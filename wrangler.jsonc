@@ -14,30 +14,11 @@
     // "GOOGLE_FONT": "",
     // "CUSTOM_SCRIPT": ""
   },
-  // "kv_namespaces": [
+  // 커스텀 도메인 설정 (Cloudflare DNS에 등록된 도메인 필요)
+  // "routes": [
   //   {
-  //     "binding": "MY_KV_NAMESPACE",
-  //     "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  //     "pattern": "blog.example.com",
+  //     "custom_domain": true
   //   }
   // ],
-  // "r2_buckets": [
-  //   {
-  //     "binding": "MY_BUCKET",
-  //     "bucket_name": "my-bucket"
-  //   }
-  // ],
-  // "d1_databases": [
-  //   {
-  //     "binding": "MY_DB",
-  //     "database_name": "my-database",
-  //     "database_id": ""
-  //   }
-  // ],
-  // "ai": {
-  //   "binding": "AI"
-  // },
-  // "observability": {
-  //   "enabled": true,
-  //   "head_sampling_rate": 1
-  // }
 }

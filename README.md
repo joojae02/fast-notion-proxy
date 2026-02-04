@@ -102,20 +102,24 @@ Workers & Pages → 해당 Worker → Settings → Variables에서 설정
 
 ## Custom Domain Setup
 
-### Cloudflare에서 도메인 연결
+`wrangler.jsonc`에서 `routes` 주석을 해제하고 도메인을 설정합니다:
 
-1. Cloudflare Dashboard에서 Workers & Pages로 이동
-2. 배포된 Worker 선택
-3. **Settings** → **Triggers** → **Custom Domains**
-4. 도메인 추가 (예: `blog.example.com`)
-
-### 외부 도메인 사용 시
-
-도메인의 DNS를 Cloudflare로 이전하거나, CNAME 레코드를 설정합니다:
-
+```jsonc
+{
+  "vars": {
+    "MY_DOMAIN": "blog.example.com",
+    "ROOT_PAGE_ID": "..."
+  },
+  "routes": [
+    {
+      "pattern": "blog.example.com",
+      "custom_domain": true
+    }
+  ]
+}
 ```
-blog.example.com  CNAME  your-worker.your-subdomain.workers.dev
-```
+
+> **Note**: 도메인이 Cloudflare DNS에 등록되어 있어야 합니다.
 
 ## Project Structure
 
