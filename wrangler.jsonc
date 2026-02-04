@@ -2,13 +2,18 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "fast-notion-proxy",
   "main": "src/index.ts",
-  "compatibility_date": "2026-02-01"
+  "compatibility_date": "2026-02-01",
   // "compatibility_flags": [
   //   "nodejs_compat"
   // ],
-  // "vars": {
-  //   "MY_VAR": "my-variable"
-  // },
+  "vars": {
+    "MY_DOMAIN": "localhost:8787",
+    "ROOT_PAGE_ID": "59a98d76552f4aae8067fb4fc9b11a79"
+    // "PAGE_TITLE": "",
+    // "PAGE_DESCRIPTION": "",
+    // "GOOGLE_FONT": "",
+    // "CUSTOM_SCRIPT": ""
+  },
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",
