@@ -141,13 +141,13 @@ export function createBodyRewriter(config: Config): HTMLRewriterElementContentHa
       function onDark() {
         el.innerHTML = '<div title="Change to Light Mode" style="margin-left: auto; margin-right: 14px; min-width: 0px;"><div role="button" tabindex="0" style="user-select: none; transition: background 120ms ease-in 0s; cursor: pointer; border-radius: 44px;"><div style="display: flex; flex-shrink: 0; height: 14px; width: 26px; border-radius: 44px; padding: 2px; box-sizing: content-box; background: rgb(46, 170, 220); transition: background 200ms ease 0s, box-shadow 200ms ease 0s;"><div style="width: 14px; height: 14px; border-radius: 44px; background: white; transition: transform 200ms ease-out 0s, background 200ms ease-out 0s; transform: translateX(12px) translateY(0px);"></div></div></div></div>';
         document.body.classList.add('dark');
-        __console.environment.ThemeStore.setState({ mode: 'dark' });
+        try { __console.environment.ThemeStore.setState({ mode: 'dark' }); } catch(e) {}
       }
 
       function onLight() {
         el.innerHTML = '<div title="Change to Dark Mode" style="margin-left: auto; margin-right: 14px; min-width: 0px;"><div role="button" tabindex="0" style="user-select: none; transition: background 120ms ease-in 0s; cursor: pointer; border-radius: 44px;"><div style="display: flex; flex-shrink: 0; height: 14px; width: 26px; border-radius: 44px; padding: 2px; box-sizing: content-box; background: rgba(135, 131, 120, 0.3); transition: background 200ms ease 0s, box-shadow 200ms ease 0s;"><div style="width: 14px; height: 14px; border-radius: 44px; background: white; transition: transform 200ms ease-out 0s, background 200ms ease-out 0s; transform: translateX(0px) translateY(0px);"></div></div></div></div>';
         document.body.classList.remove('dark');
-        __console.environment.ThemeStore.setState({ mode: 'light' });
+        try { __console.environment.ThemeStore.setState({ mode: 'light' }); } catch(e) {}
       }
 
       function toggle() {
@@ -225,12 +225,76 @@ export function createBodyRewriter(config: Config): HTMLRewriterElementContentHa
         return pushState.apply(window.history, arguments);
       };
 
-      // XHR 요청을 notion.so로 리다이렉트
+      // 프록시에 불필요한 요청 차단 (msgstore 등 실시간 협업 기능)
+      function shouldBlock(url) {
+        return /msgstore.*notion\.so/.test(url);
+      }
+
+      // XHR: 불필요한 요청만 차단, 나머지는 프록시 경유
       const open = window.XMLHttpRequest.prototype.open;
       window.XMLHttpRequest.prototype.open = function() {
-        arguments[1] = arguments[1].replace('${MY_DOMAIN}', 'www.notion.so');
+        if (shouldBlock(arguments[1])) { arguments[1] = ''; return; }
         return open.apply(this, [].slice.call(arguments));
       };
+
+      // fetch: 불필요한 요청만 차단, 나머지는 프록시 경유
+      const originalFetch = window.fetch;
+      window.fetch = function() {
+        var url = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] instanceof Request ? arguments[0].url : '');
+        if (shouldBlock(url)) { return Promise.resolve(new Response('', { status: 200 })); }
+        return originalFetch.apply(this, arguments);
+      };
+
+      // notion.so / notion.site URL 판별
+      function isNotionUrl(href) {
+        try {
+          const u = new URL(href);
+          return u.hostname === 'www.notion.so'
+            || u.hostname === 'notion.so'
+            || u.hostname.endsWith('.notion.site');
+        } catch(e) { return false; }
+      }
+
+      // <a> href를 커스텀 도메인으로 직접 치환
+      function rewriteLink(link) {
+        const href = link.href;
+        if (!href || !isNotionUrl(href)) return;
+        try {
+          const u = new URL(href);
+          u.hostname = '${MY_DOMAIN}';
+          u.protocol = 'https:';
+          link.href = u.toString();
+        } catch(e) {}
+      }
+
+      // MutationObserver로 동적 생성되는 <a> 태그 href 실시간 치환
+      const linkObserver = new MutationObserver(function(mutations) {
+        for (let i = 0; i < mutations.length; i++) {
+          const added = mutations[i].addedNodes;
+          for (let j = 0; j < added.length; j++) {
+            const node = added[j];
+            if (node.nodeType !== 1) continue;
+            if (node.tagName === 'A') { rewriteLink(node); }
+            if (node.querySelectorAll) {
+              const links = node.querySelectorAll('a[href]');
+              for (let k = 0; k < links.length; k++) { rewriteLink(links[k]); }
+            }
+          }
+        }
+      });
+      linkObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+      // 클릭 안전장치: 혹시 누락된 notion 링크 클릭 시 리다이렉트
+      document.addEventListener('click', function(e) {
+        const target = e.target.closest('a');
+        if (!target) return;
+        if (isNotionUrl(target.href)) {
+          e.preventDefault();
+          e.stopPropagation();
+          rewriteLink(target);
+          window.location.href = target.href;
+        }
+      }, true);
     </script>${CUSTOM_SCRIPT}`
 
       element.append(script, { html: true })

@@ -11,7 +11,7 @@ const BROWSER_USER_AGENT =
  * Notion API 프록시
  * /api/* 요청을 www.notion.so로 전달
  */
-async function proxyNotionApi(path: string, body: ReadableStream<Uint8Array> | null): Promise<Response> {
+async function proxyNotionApi(path: string, body: ReadableStream<Uint8Array> | null, myDomain: string): Promise<Response> {
   const url = `https://www.notion.so${path}`
 
   // getPublicPageData는 body 없이 요청
@@ -26,8 +26,18 @@ async function proxyNotionApi(path: string, body: ReadableStream<Uint8Array> | n
     },
   })
 
-  // 응답 복제 후 CORS 헤더 추가
-  const newResponse = new Response(response.body, response)
+  // 응답 본문에서 notion 도메인을 커스텀 도메인으로 치환
+  // lookbehind로 서브도메인(msgstore-001.www.notion.so 등) 치환 방지
+  let responseBody = await response.text()
+  responseBody = responseBody
+    .replace(/(?<!\.)www\.notion\.so/g, myDomain)
+    .replace(/(?<![a-zA-Z0-9.-])notion\.so/g, myDomain)
+    .replace(/[a-zA-Z0-9-]+\.notion\.site/g, myDomain)
+
+  const newResponse = new Response(responseBody, {
+    status: response.status,
+    headers: response.headers,
+  })
   newResponse.headers.set('Access-Control-Allow-Origin', '*')
 
   return newResponse
@@ -42,9 +52,11 @@ async function proxyNotionJs(path: string, myDomain: string): Promise<Response> 
   const response = await fetch(url)
 
   let body = await response.text()
+  // lookbehind로 서브도메인(msgstore-001.www.notion.so 등) 치환 방지
   body = body
-    .replace(/www\.notion\.so/g, myDomain)
-    .replace(/notion\.so/g, myDomain)
+    .replace(/(?<!\.)www\.notion\.so/g, myDomain)
+    .replace(/(?<![a-zA-Z0-9.-])notion\.so/g, myDomain)
+    .replace(/[a-zA-Z0-9-]+\.notion\.site/g, myDomain)
 
   return new Response(body, {
     status: response.status,
@@ -102,9 +114,9 @@ export function createProxyHandler(config: Config) {
       return proxyNotionJs(path, MY_DOMAIN)
     }
 
-    // 2. /api/* - Notion API
+    // 2. /api/* - Notion API (응답 본문 도메인 치환)
     if (path.startsWith('/api')) {
-      return proxyNotionApi(path, c.req.raw.body)
+      return proxyNotionApi(path, c.req.raw.body, MY_DOMAIN)
     }
 
     // 3. /{slug} - 슬러그 → 페이지 ID 리다이렉트
