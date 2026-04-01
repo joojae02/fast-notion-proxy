@@ -1,126 +1,158 @@
 import { Context } from 'hono'
 import { Config } from './config'
 import { applyHtmlRewriters } from './rewriters'
-import { isNotionPageId } from './utils'
 
-// 브라우저 User-Agent (봇 감지 회피용)
-const BROWSER_USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.163 Safari/537.36'
+const USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
 
-/**
- * Notion API 프록시
- * /api/* 요청을 www.notion.so로 전달
- */
-async function proxyNotionApi(path: string, body: ReadableStream<Uint8Array> | null): Promise<Response> {
-  const url = `https://www.notion.so${path}`
-
-  // getPublicPageData는 body 없이 요청
-  const requestBody = path.includes('/api/v3/getPublicPageData') ? null : body
-
-  const response = await fetch(url, {
-    method: 'POST',
-    body: requestBody,
-    headers: {
-      'content-type': 'application/json;charset=UTF-8',
-      'user-agent': BROWSER_USER_AGENT,
-    },
-  })
-
-  // 응답 복제 후 CORS 헤더 추가
-  const newResponse = new Response(response.body, response)
-  newResponse.headers.set('Access-Control-Allow-Origin', '*')
-
-  return newResponse
-}
-
-/**
- * Notion JS 파일 프록시
- * /app/*.js 파일 내 도메인을 커스텀 도메인으로 치환
- */
-async function proxyNotionJs(path: string, myDomain: string): Promise<Response> {
-  const url = `https://www.notion.so${path}`
-  const response = await fetch(url)
-
-  let body = await response.text()
-  body = body
+function rewriteDomainInBody(body: string, myDomain: string): string {
+  return body
+    .replace(/[a-z0-9-]+\.notion\.site/g, myDomain)
     .replace(/www\.notion\.so/g, myDomain)
-    .replace(/notion\.so/g, myDomain)
-
-  return new Response(body, {
-    status: response.status,
-    headers: {
-      'Content-Type': 'application/x-javascript',
-    },
-  })
 }
 
-/**
- * 일반 요청 프록시
- * HTML 응답에는 HTMLRewriter 적용
- */
-async function proxyNotionPage(request: Request, path: string, config: Config): Promise<Response> {
-  const url = `https://www.notion.so${path}`
-
-  // Accept-Encoding 제거하여 압축되지 않은 응답 받기 (HTMLRewriter용)
-  const headers = new Headers(request.headers)
-  headers.delete('Accept-Encoding')
-
-  const response = await fetch(url, {
-    method: request.method,
-    headers,
-    body: request.body,
-  })
-
-  // 응답 복제
-  const newResponse = new Response(response.body, response)
-
-  // CSP 헤더 제거 (커스텀 스크립트 허용)
-  newResponse.headers.delete('Content-Security-Policy')
-  newResponse.headers.delete('X-Content-Security-Policy')
-
-  // HTML 응답이면 HTMLRewriter 적용
-  const contentType = response.headers.get('Content-Type') || ''
-  if (contentType.includes('text/html')) {
-    return applyHtmlRewriters(newResponse, config)
-  }
-
-  return newResponse
-}
-
-/**
- * 메인 프록시 핸들러
- */
 export function createProxyHandler(config: Config) {
-  const { MY_DOMAIN, SLUG_TO_PAGE, slugs, pages } = config
+  const {
+    MY_DOMAIN,
+    NOTION_SITE_DOMAIN,
+    NOTION_SPACE_DOMAIN,
+    CUSTOM_SPACE_DOMAIN,
+    PARENT_DOMAIN,
+    SLUG_TO_PAGE,
+    PAGE_TO_SLUG,
+    slugs,
+    pages,
+  } = config
 
   return async function handleProxy(c: Context): Promise<Response> {
-    const url = new URL(c.req.url)
-    const path = url.pathname + url.search
+    const reqUrl = new URL(c.req.url)
 
-    // 1. /app/*.js - Notion JS 파일 (도메인 치환)
-    if (path.startsWith('/app') && path.endsWith('.js')) {
-      return proxyNotionJs(path, MY_DOMAIN)
+    // notion.site 도메인으로 URL 변환
+    reqUrl.hostname = NOTION_SITE_DOMAIN
+
+    const path = reqUrl.pathname
+
+    // 1. /app/*.js, /_assets/*.js → Notion JS 프록시 (도메인 치환)
+    const isJs =
+      (path.startsWith('/app') || path.startsWith('/_assets/')) && path.endsWith('.js')
+    if (isJs) {
+      const response = await fetch(reqUrl.toString())
+      let body = await response.text()
+      body = rewriteDomainInBody(body, MY_DOMAIN)
+        .replace(/"notion\.site"/g, `"${PARENT_DOMAIN}"`)
+      return new Response(body, {
+        status: response.status,
+        headers: { 'Content-Type': 'text/javascript' },
+      })
     }
 
-    // 2. /api/* - Notion API
+    // 2. /api/v3/getPublicPageData → spaceDomain/publicDomainName 리라이팅
+    if (path.startsWith('/api/v3/getPublicPageData')) {
+      let reqBody = await c.req.text()
+      reqBody = reqBody.replace(new RegExp(CUSTOM_SPACE_DOMAIN, 'g'), NOTION_SPACE_DOMAIN)
+
+      // root URL에서 blockId 없으면 주입
+      try {
+        const json = JSON.parse(reqBody)
+        if (!json.blockId && SLUG_TO_PAGE['']) {
+          json.blockId = SLUG_TO_PAGE[''].replace(
+            /(.{8})(.{4})(.{4})(.{4})(.{12})/,
+            '$1-$2-$3-$4-$5'
+          )
+          reqBody = JSON.stringify(json)
+        }
+      } catch {}
+
+      const response = await fetch(reqUrl.toString(), {
+        method: 'POST',
+        body: reqBody,
+        headers: {
+          'content-type': 'application/json;charset=UTF-8',
+          'user-agent': USER_AGENT,
+        },
+      })
+
+      let body = await response.text()
+      body = rewriteDomainInBody(body, MY_DOMAIN)
+
+      try {
+        const json = JSON.parse(body)
+        if (json.spaceDomain) json.spaceDomain = CUSTOM_SPACE_DOMAIN
+        if (json.publicDomainName) json.publicDomainName = PARENT_DOMAIN
+        delete json.requireInterstitial
+        json.requestedOnExternalDomain = false
+        body = JSON.stringify(json)
+      } catch {}
+
+      const newResponse = new Response(body, response)
+      newResponse.headers.set('Access-Control-Allow-Origin', '*')
+      newResponse.headers.delete('Content-Security-Policy')
+      return newResponse
+    }
+
+    // 3. /api/* → Notion API 프록시 (도메인 리라이팅)
     if (path.startsWith('/api')) {
-      return proxyNotionApi(path, c.req.raw.body)
+      let reqBody = await c.req.text()
+      reqBody = reqBody.replace(new RegExp(CUSTOM_SPACE_DOMAIN, 'g'), NOTION_SPACE_DOMAIN)
+
+      const response = await fetch(reqUrl.toString(), {
+        method: 'POST',
+        body: reqBody,
+        headers: {
+          'content-type': 'application/json;charset=UTF-8',
+          'user-agent': USER_AGENT,
+        },
+      })
+
+      let body = await response.text()
+      body = rewriteDomainInBody(body, MY_DOMAIN)
+      body = body.replace(new RegExp(NOTION_SPACE_DOMAIN, 'g'), CUSTOM_SPACE_DOMAIN)
+
+      const newResponse = new Response(body, response)
+      newResponse.headers.set('Access-Control-Allow-Origin', '*')
+      newResponse.headers.delete('Content-Security-Policy')
+      return newResponse
     }
 
-    // 3. /{slug} - 슬러그 → 페이지 ID 리다이렉트
-    const pathWithoutSlash = path.slice(1).split('?')[0]
-    const protocol = MY_DOMAIN.includes('localhost') ? 'http' : 'https'
-    if (slugs.includes(pathWithoutSlash)) {
-      const pageId = SLUG_TO_PAGE[pathWithoutSlash]
-      return c.redirect(`${protocol}://${MY_DOMAIN}/${pageId}`, 301)
+    // 4. /login → 홈으로 리다이렉트
+    if (path === '/login') {
+      return c.redirect(`https://${MY_DOMAIN}/`, 302)
     }
 
-    // 4. /{32자 hex} - 미등록 페이지 ID → 홈으로 리다이렉트
-    if (!pages.includes(pathWithoutSlash) && isNotionPageId(pathWithoutSlash)) {
-      return c.redirect(`${protocol}://${MY_DOMAIN}`, 301)
+    // 5. /{slug} → 해당 페이지 직접 프록시 (리다이렉트 대신)
+    const pathSlug = path.slice(1).split('?')[0]
+    let currentSlug = ''
+
+    if (slugs.includes(pathSlug)) {
+      const pageId = SLUG_TO_PAGE[pathSlug]
+      reqUrl.pathname = '/' + pageId
+      currentSlug = pathSlug
+    } else {
+      // 페이지 ID에서 슬러그 역매핑
+      const idMatch = path.match(/[0-9a-f]{32}/)
+      if (idMatch) {
+        currentSlug = PAGE_TO_SLUG[idMatch[0]] || ''
+      }
     }
 
-    // 5. 기타 - 투명 프록시
-    return proxyNotionPage(c.req.raw, path, config)
+    // 6. 일반 프록시
+    const response = await fetch(reqUrl.toString(), {
+      headers: {
+        'user-agent': USER_AGENT,
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9',
+      },
+    })
+
+    const newResponse = new Response(response.body, response)
+    newResponse.headers.delete('Content-Security-Policy')
+    newResponse.headers.delete('X-Content-Security-Policy')
+
+    const contentType = response.headers.get('Content-Type') || ''
+    if (contentType.includes('text/html')) {
+      return applyHtmlRewriters(newResponse, config, currentSlug)
+    }
+
+    return newResponse
   }
 }
