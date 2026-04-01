@@ -2,12 +2,27 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "fast-notion-proxy",
   "main": "src/index.ts",
-  "compatibility_date": "2026-02-01"
-  // 커스텀 도메인 설정 (Cloudflare DNS에 등록된 도메인 필요)
-  // "routes": [
-  //   {
-  //     "pattern": "blog.example.com",
-  //     "custom_domain": true
-  //   }
-  // ],
+  "compatibility_date": "2026-02-01",
+  "vars": {
+    // 필수
+    "MY_DOMAIN": "notion-blog.joojae.com",
+    "NOTION_URL": "https://precious-stove-155.notion.site/Notion-Blog-2fe938b502838077a510dafbd97723dd",
+
+    // 선택 - SEO
+    "PAGE_TITLE": "Notion 기반 Blog 튜토리얼",
+    "PAGE_DESCRIPTION": "Notion을 Blog로 사용하기~"
+
+    // 선택 - 슬러그 매핑 (JSON 문자열)
+    // "SLUG_TO_PAGE": "{\"about\":\"abcdef01234567890abcdef012345678\"}",
+
+    // 선택 - 커스터마이징
+    // "GOOGLE_FONT": "Noto Sans KR",
+    // "CUSTOM_SCRIPT": "<script>...</script>"
+  },
+  "routes": [
+    {
+      "pattern": "notion-blog.joojae.com",
+      "custom_domain": true
+    }
+  ]
 }
