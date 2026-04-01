@@ -1,10 +1,12 @@
 # 로컬 개발용 환경 변수
 # 이 파일을 .dev.vars로 복사하여 사용하세요
 
+# 필수
 MY_DOMAIN=localhost:8787
-ROOT_PAGE_ID=59a98d76552f4aae8067fb4fc9b11a79
+NOTION_URL=https://your-space.notion.site/Page-59a98d76552f4aae8067fb4fc9b11a79
 
-# 선택 항목
+# 선택
+# SLUG_TO_PAGE={"about":"abcdef01234567890abcdef012345678"}
 # PAGE_TITLE=
 # PAGE_DESCRIPTION=
 # GOOGLE_FONT=

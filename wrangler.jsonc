@@ -2,16 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "fast-notion-proxy",
   "main": "src/index.ts",
-  "compatibility_date": "2026-02-01",
-  "vars": {
-    "MY_DOMAIN": "localhost:8787",
-    "NOTION_URL": "https://your-space.notion.site/59a98d76552f4aae8067fb4fc9b11a79"
-    // "SLUG_TO_PAGE": "{\"about\":\"abcdef01234567890abcdef012345678\"}",
-    // "PAGE_TITLE": "",
-    // "PAGE_DESCRIPTION": "",
-    // "GOOGLE_FONT": "",
-    // "CUSTOM_SCRIPT": ""
-  }
+  "compatibility_date": "2026-02-01"
   // 커스텀 도메인 설정 (Cloudflare DNS에 등록된 도메인 필요)
   // "routes": [
   //   {
