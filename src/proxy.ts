@@ -11,6 +11,15 @@ function rewriteDomainInBody(body: string, myDomain: string): string {
     .replace(/www\.notion\.so/g, myDomain)
 }
 
+/** Notion URL로 변환 (프로토콜/포트 정리) */
+function toNotionUrl(reqUrl: URL, notionDomain: string): URL {
+  const url = new URL(reqUrl.toString())
+  url.hostname = notionDomain
+  url.protocol = 'https:'
+  url.port = ''
+  return url
+}
+
 export function createProxyHandler(config: Config) {
   const {
     MY_DOMAIN,
@@ -21,22 +30,26 @@ export function createProxyHandler(config: Config) {
     SLUG_TO_PAGE,
     PAGE_TO_SLUG,
     slugs,
-    pages,
   } = config
 
   return async function handleProxy(c: Context): Promise<Response> {
-    const reqUrl = new URL(c.req.url)
-
-    // notion.site 도메인으로 URL 변환
-    reqUrl.hostname = NOTION_SITE_DOMAIN
-
+    const reqUrl = toNotionUrl(new URL(c.req.url), NOTION_SITE_DOMAIN)
     const path = reqUrl.pathname
 
-    // 1. /app/*.js, /_assets/*.js → Notion JS 프록시 (도메인 치환)
+    // 1. 정적 리소스 (CSS, 이미지, 폰트, wasm 등) → 스트리밍 패스스루
+    if (isStaticAsset(path)) {
+      return fetch(reqUrl.toString())
+    }
+
+    // 2. /app/*.js, /_assets/*.js → Notion JS 프록시 (도메인 치환)
     const isJs =
       (path.startsWith('/app') || path.startsWith('/_assets/')) && path.endsWith('.js')
     if (isJs) {
       const response = await fetch(reqUrl.toString())
+      if (response.status === 403) {
+        // 인증 필요 리소스는 body 읽지 않고 바로 반환
+        return response
+      }
       let body = await response.text()
       body = rewriteDomainInBody(body, MY_DOMAIN)
         .replace(/"notion\.site"/g, `"${PARENT_DOMAIN}"`)
@@ -46,7 +59,7 @@ export function createProxyHandler(config: Config) {
       })
     }
 
-    // 2. /api/v3/getPublicPageData → spaceDomain/publicDomainName 리라이팅
+    // 3. /api/v3/getPublicPageData → spaceDomain/publicDomainName 리라이팅
     if (path.startsWith('/api/v3/getPublicPageData')) {
       let reqBody = await c.req.text()
       reqBody = reqBody.replace(new RegExp(CUSTOM_SPACE_DOMAIN, 'g'), NOTION_SPACE_DOMAIN)
@@ -90,7 +103,7 @@ export function createProxyHandler(config: Config) {
       return newResponse
     }
 
-    // 3. /api/* → Notion API 프록시 (도메인 리라이팅)
+    // 4. /api/* → Notion API 프록시 (도메인 리라이팅)
     if (path.startsWith('/api')) {
       let reqBody = await c.req.text()
       reqBody = reqBody.replace(new RegExp(CUSTOM_SPACE_DOMAIN, 'g'), NOTION_SPACE_DOMAIN)
@@ -114,12 +127,12 @@ export function createProxyHandler(config: Config) {
       return newResponse
     }
 
-    // 4. /login → 홈으로 리다이렉트
+    // 5. /login → 홈으로 리다이렉트
     if (path === '/login') {
       return c.redirect(`https://${MY_DOMAIN}/`, 302)
     }
 
-    // 5. /{slug} → 해당 페이지 직접 프록시 (리다이렉트 대신)
+    // 6. /{slug} → 해당 페이지 직접 프록시 (리다이렉트 대신)
     const pathSlug = path.slice(1).split('?')[0]
     let currentSlug = ''
 
@@ -128,14 +141,13 @@ export function createProxyHandler(config: Config) {
       reqUrl.pathname = '/' + pageId
       currentSlug = pathSlug
     } else {
-      // 페이지 ID에서 슬러그 역매핑
       const idMatch = path.match(/[0-9a-f]{32}/)
       if (idMatch) {
         currentSlug = PAGE_TO_SLUG[idMatch[0]] || ''
       }
     }
 
-    // 6. 일반 프록시
+    // 7. 일반 프록시
     const response = await fetch(reqUrl.toString(), {
       headers: {
         'user-agent': USER_AGENT,
@@ -155,4 +167,9 @@ export function createProxyHandler(config: Config) {
 
     return newResponse
   }
+}
+
+/** 도메인 치환이 필요 없는 정적 리소스 판별 */
+function isStaticAsset(path: string): boolean {
+  return /\.(css|woff2?|ttf|eot|ico|png|jpg|jpeg|gif|webp|avif|svg|wasm|mp4|webm|mp3|ogg)(\?.*)?$/.test(path)
 }
